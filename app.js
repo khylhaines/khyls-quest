@@ -14,6 +14,7 @@ import { getRandomMystery } from "./mysteries.js";
 const $ = (id) => document.getElementById(id);
 
 const SAVE_KEY = "bq_world_v11";
+const INTRO_SEEN_KEY = "bq_intro_seen_v1";
 
 const DEFAULT_STATE = {
   players: [
@@ -103,7 +104,6 @@ const SHOP_ITEMS = [
 ];
 
 let state = loadState();
-
 let map = null;
 let heroMarker = null;
 let activeMarkers = {};
@@ -148,9 +148,30 @@ const CLASSIC_MODE_ORDER = [
   "discovery",
 ];
 
+const ADVENTURE_INTRO_TEXT = `
+Welcome to Barrow Quest.
+
+This is your walking adventure map around Barrow.
+
+Start by choosing a route. Full Barrow gives you the wider town. Park gives you the park world. Abbey gives you the abbey world.
+
+When you get close enough to a live pin, the mission button will wake up. Tap it to open that location.
+
+Each place gives you something to do. You might get a quiz, a story, a logic task, a family mission, a ghost prompt, or a boss trial.
+
+Complete missions to earn coins and experience. Coins are for the shop. Experience shows your progress as you explore more of the map.
+
+You do not need to rush. Just move from place to place, follow the missions, and let the town turn into the adventure.
+
+Pick a route, head to a pin, and begin.
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
 /* ============================
    SPEECH / NARRATOR
 ============================ */
+
 let speechEnabled = true;
 let speechVoice = null;
 
@@ -174,7 +195,6 @@ function speakText(text, interrupt = true) {
 
   try {
     if (interrupt) stopSpeech();
-
     const utter = new SpeechSynthesisUtterance(String(text));
     utter.pitch = Number(state?.settings?.voicePitch || 1);
     utter.rate = Number(state?.settings?.voiceRate || 1);
@@ -182,9 +202,7 @@ function speakText(text, interrupt = true) {
       0,
       Math.min(1, Number(state?.settings?.sfxVol || 80) / 100)
     );
-
     if (speechVoice) utter.voice = speechVoice;
-
     window.speechSynthesis.speak(utter);
   } catch (err) {
     console.warn("Speech failed:", err);
@@ -200,6 +218,7 @@ function speakOptions(options = []) {
 /* ============================
    SAVE / STATE
 ============================ */
+
 function loadState() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -266,6 +285,7 @@ function loadState() {
       meta: {
         ...structuredClone(DEFAULT_STATE.meta),
         ...(parsed.meta || {}),
+        tokens: 0,
       },
     };
   } catch {
@@ -274,12 +294,14 @@ function loadState() {
 }
 
 function saveState() {
+  state.meta.tokens = 0;
   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
 }
 
 /* ============================
    PROGRESSION / COMPLETION
 ============================ */
+
 function getLevelFromXP(xp) {
   const safeXp = Math.max(0, Number(xp || 0));
   return Math.floor(safeXp / 100) + 1;
@@ -330,13 +352,11 @@ function recordPinCompletion(pin, mode, rewardResult, questionId) {
       lastReward: {
         coins: Number(rewardResult?.coins || 0),
         xp: Number(rewardResult?.xp || 0),
-        tokens: Number(rewardResult?.tokens || 0),
+        tokens: 0,
       },
     };
-
     state.pinStats.totalCompleted += 1;
     state.pinStats.totalFirstCompletions += 1;
-
     return { firstTime: true, record: state.completedPins[key] };
   }
 
@@ -346,7 +366,7 @@ function recordPinCompletion(pin, mode, rewardResult, questionId) {
   existing.lastReward = {
     coins: Number(rewardResult?.coins || 0),
     xp: Number(rewardResult?.xp || 0),
-    tokens: Number(rewardResult?.tokens || 0),
+    tokens: 0,
   };
 
   if (mode && !Array.isArray(existing.completedModes)) {
@@ -369,10 +389,11 @@ function getCurrentModeProgress() {
 }
 
 function getRewardForMission({ mode, correct }) {
-  const base = applyReward({
-    mode,
-    correct,
-  }) || { coins: 25, xp: 10, tokens: 0 };
+  const base =
+    applyReward({
+      mode,
+      correct,
+    }) || { coins: 25, xp: 10, tokens: 0 };
 
   const firstTime = currentPin ? !isPinCompleted(currentPin) : false;
 
@@ -380,7 +401,7 @@ function getRewardForMission({ mode, correct }) {
     return {
       coins: Number(base.coins || 0),
       xp: Number(base.xp || 0) + 10,
-      tokens: Number(base.tokens || 0) + 1,
+      tokens: 0,
       firstTime: true,
     };
   }
@@ -396,6 +417,7 @@ function getRewardForMission({ mode, correct }) {
 /* ============================
    PLAYERS / HUD
 ============================ */
+
 function getEnabledPlayers() {
   return state.players.filter((p) => p.enabled);
 }
@@ -421,7 +443,6 @@ function setPlayerCount(count) {
   state.players.forEach((p, i) => {
     p.enabled = i < count;
   });
-
   const active = getActivePlayer();
   state.activePlayerId = active.id;
   saveState();
@@ -464,16 +485,20 @@ function renderHUD() {
 
   const coins = active?.coins || 0;
   const xp = Number(state.meta?.xp || 0);
-  const tokens = Number(state.meta?.tokens || 0);
 
   if ($("top-coins")) $("top-coins").innerText = String(coins);
   if ($("top-xp")) $("top-xp").innerText = `L${getLevelFromXP(xp)} • ${xp}`;
-  if ($("top-tokens")) $("top-tokens").innerText = String(tokens);
+
+  if ($("top-tokens")) {
+    $("top-tokens").innerText = "";
+    $("top-tokens").style.display = "none";
+  }
 }
 
 /* ============================
    MODALS
 ============================ */
+
 function hideAllModals() {
   document.querySelectorAll(".full-modal").forEach((el) => {
     el.style.display = "none";
@@ -494,6 +519,7 @@ function closeModal(id) {
 /* ============================
    HELPERS
 ============================ */
+
 function hasValidCoords(pin) {
   return (
     Array.isArray(pin?.l) &&
@@ -651,9 +677,7 @@ function showQuestLayoutForPack() {
 
 function normaliseClassicModeFromPin(pin) {
   if (!pin) return "quiz";
-
   const type = String(pin.type || "").toLowerCase();
-
   if (!type || type === "start") return "quiz";
   if (type === "story") return "history";
   if (type === "battle") return "activity";
@@ -793,7 +817,6 @@ function renderClassicModeChoices(pin) {
     }
 
     tile.classList.remove("hidden");
-
     const meta = CLASSIC_MODE_META[mode];
     if (meta) {
       tile.innerHTML = `<span>${meta.icon}</span>${meta.label}`;
@@ -803,7 +826,6 @@ function renderClassicModeChoices(pin) {
 
 function clearTaskBlocks() {
   const ids = ["task-block-story", "task-block-evidence", "task-block-clue"];
-
   ids.forEach((id) => {
     const el = $(id);
     if (el) el.classList.add("hidden");
@@ -833,8 +855,117 @@ function setTaskBlock(id, bodyId, text) {
 }
 
 /* ============================
+   INTRO / RUNTIME LAYOUT
+============================ */
+
+function ensureAdventureIntroCard() {
+  const startModal = $("start-modal");
+  if (!startModal || $("bq-intro-card")) return;
+
+  const target =
+    startModal.querySelector(".start-grid") ||
+    startModal.querySelector(".start-card") ||
+    startModal;
+
+  const card = document.createElement("div");
+  card.id = "bq-intro-card";
+  card.style.marginTop = "14px";
+  card.style.padding = "16px";
+  card.style.borderRadius = "16px";
+  card.style.border = "1px solid rgba(255,255,255,0.12)";
+  card.style.background = "rgba(10,10,10,0.82)";
+  card.style.color = "#f4f4f4";
+  card.style.lineHeight = "1.55";
+  card.style.boxShadow = "0 8px 22px rgba(0,0,0,0.28)";
+  card.innerHTML = `
+    <div style="font-size:18px;font-weight:700;color:#ffd54a;margin-bottom:10px;">
+      BARROW QUEST GUIDE
+    </div>
+    <div id="bq-intro-text" style="font-size:14px;opacity:.95;">
+      Welcome to Barrow Quest. Pick a route, walk to a live pin, open the mission, and complete the challenge to earn coins and XP. Take your time and explore it like an adventure.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+      <button id="btn-replay-intro" class="win-btn">READ INTRO</button>
+      <button id="btn-skip-intro" class="win-btn">SKIP VOICE</button>
+    </div>
+  `;
+
+  target.appendChild(card);
+
+  $("btn-replay-intro")?.addEventListener("click", () => {
+    speakText(ADVENTURE_INTRO_TEXT);
+  });
+
+  $("btn-skip-intro")?.addEventListener("click", () => {
+    stopSpeech();
+  });
+}
+
+function maybePlayAdventureIntro(force = false) {
+  ensureAdventureIntroCard();
+
+  const seen = localStorage.getItem(INTRO_SEEN_KEY) === "1";
+  if (!force && seen) return;
+
+  localStorage.setItem(INTRO_SEEN_KEY, "1");
+
+  if ($("q-story")) {
+    $("q-story").innerText = ADVENTURE_INTRO_TEXT;
+  }
+
+  setTimeout(() => {
+    speakText(ADVENTURE_INTRO_TEXT);
+  }, 500);
+}
+
+function applyRuntimeLayoutTweaks() {
+  const homeBtn = $("btn-home");
+  if (homeBtn) {
+    homeBtn.style.position = "fixed";
+    homeBtn.style.top = "14px";
+    homeBtn.style.left = "14px";
+    homeBtn.style.right = "auto";
+    homeBtn.style.bottom = "auto";
+    homeBtn.style.zIndex = "9999";
+  }
+
+  const shopBtn = $("btn-shop");
+  const modeBtn = $("action-trigger");
+  if (shopBtn) {
+    shopBtn.style.position = "fixed";
+    shopBtn.style.left = "18px";
+    shopBtn.style.bottom = modeBtn ? "86px" : "24px";
+    shopBtn.style.zIndex = "9998";
+  }
+
+  if (modeBtn) {
+    modeBtn.style.position = "fixed";
+    modeBtn.style.left = "18px";
+    modeBtn.style.bottom = "148px";
+    modeBtn.style.zIndex = "9999";
+  }
+
+  if ($("top-tokens")) {
+    $("top-tokens").style.display = "none";
+  }
+}
+
+function refreshFloatingButtonLayout() {
+  const shopBtn = $("btn-shop");
+  const actionBtn = $("action-trigger");
+  if (!shopBtn || !actionBtn) return;
+
+  const actionVisible =
+    actionBtn.style.display !== "none" &&
+    getComputedStyle(actionBtn).display !== "none";
+
+  shopBtn.style.bottom = actionVisible ? "86px" : "24px";
+}
+
+/* ============================
    MAP
 ============================ */
+
 function initMap() {
   const [lat, lng, zoom] = getModeStart();
 
@@ -848,7 +979,6 @@ function initMap() {
   }).addTo(map);
 
   heroMarker = L.marker([lat, lng], { icon: createHeroIcon() }).addTo(map);
-
   renderPins();
   startLocationWatch();
 }
@@ -869,9 +999,9 @@ function resetMap() {
   activeMarkers = {};
   heroMarker = null;
   currentPin = null;
-
   initMap();
   renderHomeLog();
+  refreshFloatingButtonLayout();
 }
 
 function renderPins() {
@@ -890,12 +1020,10 @@ function renderPins() {
     marker.on("click", () => {
       currentPin = pin;
       showActionButton(true);
-
       const completed = isPinCompleted(pin);
       updateCaptureText(
         completed ? `${pin.n} • COMPLETED • REPLAY` : `${pin.n} • READY`
       );
-
       speakText(
         completed
           ? `${pin.n}. Completed already. Replay available.`
@@ -916,6 +1044,7 @@ function showActionButton(show) {
   const btn = $("action-trigger");
   if (!btn) return;
   btn.style.display = show ? "block" : "none";
+  refreshFloatingButtonLayout();
 }
 
 function updateCaptureText(text) {
@@ -927,7 +1056,6 @@ function updateCaptureText(text) {
 function distanceInMeters(aLat, aLng, bLat, bLng) {
   const R = 6371000;
   const toRad = (deg) => (deg * Math.PI) / 180;
-
   const dLat = toRad(bLat - aLat);
   const dLng = toRad(bLng - aLng);
 
@@ -952,12 +1080,10 @@ function startLocationWatch() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-
       heroMarker?.setLatLng([lat, lng]);
 
       const pins = getCurrentPins();
       const radius = Number(state.settings.radius || 35);
-
       let nearby = null;
 
       for (const pin of pins) {
@@ -1010,6 +1136,7 @@ function startLocationWatch() {
 /* ============================
    QUEST FLOW
 ============================ */
+
 function openMissionMenu() {
   if (!currentPin) return;
 
@@ -1032,7 +1159,6 @@ function openMissionMenu() {
 
   if ($("mode-banner")) {
     $("mode-banner").style.display = "block";
-
     const label =
       state.activePack === "adult"
         ? "CASE BRIEFING"
@@ -1063,7 +1189,6 @@ function openMissionMenu() {
     storyText =
       getPinStartIntro(currentPin.id, getEffectiveTier()) ||
       `${currentPin.n}. Mission briefing ready.`;
-
     renderClassicModeChoices(currentPin);
   }
 
@@ -1085,7 +1210,6 @@ function openTask(mode) {
 
   if (state.activePack === "adult") {
     const content = getAdultContentForPin(currentPin);
-
     const storyText =
       content?.story ||
       "Case briefing not found for this location yet. Add story content for this adult pin.";
@@ -1183,7 +1307,6 @@ function openTask(mode) {
   setTaskBlock("task-block-story", "task-story", task?.story || "");
   setTaskBlock("task-block-evidence", "task-evidence", task?.evidence || "");
   setTaskBlock("task-block-clue", "task-clue", task?.clue || "");
-
   renderTaskOptions(task);
 
   if (task?.speech) {
@@ -1237,6 +1360,7 @@ function renderTaskOptions(question) {
 /* ============================
    MYSTERIES
 ============================ */
+
 function hasUnlockedMystery(id) {
   return state.unlockedMysteries.includes(Number(id));
 }
@@ -1253,10 +1377,8 @@ function unlockMystery(id) {
 function maybeUnlockMystery() {
   const chance = 0.35;
   if (Math.random() > chance) return null;
-
   const mystery = getRandomMystery(state.unlockedMysteries);
   if (!mystery) return null;
-
   unlockMystery(mystery.id);
   return mystery;
 }
@@ -1264,6 +1386,7 @@ function maybeUnlockMystery() {
 /* ============================
    SHOP
 ============================ */
+
 function getInventoryCount(itemId) {
   return Number(state.inventory?.[itemId] || 0);
 }
@@ -1289,7 +1412,6 @@ function renderShop() {
 
   const coins = active?.coins || 0;
   const xp = Number(state.meta?.xp || 0);
-  const tokens = Number(state.meta?.tokens || 0);
   const level = getLevelFromXP(xp);
   const levelProgress = getLevelProgress(xp);
 
@@ -1298,14 +1420,11 @@ function renderShop() {
       <strong>${active?.name || "Player"}</strong><br>
       Coins: ${coins} 🪙<br>
       XP: ${xp} (Level ${level})<br>
-      Level Progress: ${levelProgress}/100<br>
-      Tokens: ${tokens}
+      Level Progress: ${levelProgress}/100
     </div>
   `;
 
-  const ownedItems = SHOP_ITEMS.filter(
-    (item) => getInventoryCount(item.id) > 0
-  );
+  const ownedItems = SHOP_ITEMS.filter((item) => getInventoryCount(item.id) > 0);
 
   inventory.innerHTML = ownedItems.length
     ? ownedItems
@@ -1356,6 +1475,7 @@ function renderShop() {
 function buyShopItem(itemId) {
   const item = SHOP_ITEMS.find((x) => x.id === itemId);
   const active = getActivePlayer();
+
   if (!item || !active) return;
 
   if ((active.coins || 0) < item.cost) {
@@ -1369,7 +1489,6 @@ function buyShopItem(itemId) {
   saveState();
   renderHUD();
   renderShop();
-
   speakText(`${item.name} purchased.`);
   alert(`${item.name} purchased and added to inventory.`);
 }
@@ -1377,8 +1496,10 @@ function buyShopItem(itemId) {
 /* ============================
    ANSWERS / REWARDS
 ============================ */
+
 function rememberQuestion(questionId) {
   if (!questionId) return;
+
   if (!state.completedQuestionIds.includes(questionId)) {
     state.completedQuestionIds.push(questionId);
     if (state.completedQuestionIds.length > 300) {
@@ -1440,14 +1561,13 @@ function answerMission(index) {
 
   const rewardCoins = Number(rewardResult.coins || 0);
   const rewardXp = Number(rewardResult.xp || 0);
-  const rewardTokens = Number(rewardResult.tokens || 0);
 
   if (active && rewardCoins) {
     updateCoins(active.id, rewardCoins);
   }
 
   state.meta.xp = Number(state.meta.xp || 0) + rewardXp;
-  state.meta.tokens = Number(state.meta.tokens || 0) + rewardTokens;
+  state.meta.tokens = 0;
 
   const questionId = q?.meta?.questionId || q?.id || null;
   rememberQuestion(questionId);
@@ -1487,7 +1607,8 @@ function answerMission(index) {
   const firstLabel = completion.firstTime
     ? "NEW LOCATION COMPLETE"
     : "REPLAY COMPLETE";
-  const rewardLine = `+${rewardCoins} coins +${rewardXp} XP +${rewardTokens} tokens`;
+
+  const rewardLine = `+${rewardCoins} coins +${rewardXp} XP`;
 
   if (mystery) {
     feedback.innerText =
@@ -1515,6 +1636,7 @@ function answerMission(index) {
 /* ============================
    SETTINGS / HOME
 ============================ */
+
 function applySettingsToUI() {
   if ($("radius-label")) $("radius-label").innerText = state.settings.radius;
   if ($("pitch-label")) $("pitch-label").innerText = state.settings.voicePitch;
@@ -1632,10 +1754,8 @@ function updateStartButtons() {
     "active",
     state.activePack === "classic" && state.mapMode === "abbey"
   );
-
   $("pill-kids")?.classList.toggle("active", state.tierMode === "kid");
   $("pill-teen")?.classList.toggle("active", state.tierMode === "teen");
-
   $("pill-truecrime")?.classList.toggle(
     "active",
     state.activePack === "adult" && state.activeAdultCategory === "true_crime"
@@ -1653,6 +1773,7 @@ function updateStartButtons() {
 /* ============================
    AR
 ============================ */
+
 async function openAR() {
   showModal("ar-modal");
 
@@ -1690,6 +1811,7 @@ function stopAR() {
 /* ============================
    BUTTONS
 ============================ */
+
 function wireButtons() {
   $("btn-start")?.addEventListener("click", () => closeModal("start-modal"));
   $("btn-start-close")?.addEventListener("click", () =>
@@ -1702,14 +1824,11 @@ function wireButtons() {
   $("btn-home")?.addEventListener("click", () => {
     currentPin = null;
     currentTask = null;
-
     const actionBtn = $("action-trigger");
     if (actionBtn) actionBtn.style.display = "none";
-
     state.activePack = "classic";
     state.activeAdultCategory = null;
     state.mapMode = "core";
-
     saveState();
     updateStartButtons();
     resetMap();
@@ -1769,6 +1888,7 @@ function wireButtons() {
   $("btn-close-quest")?.addEventListener("click", () =>
     closeModal("quest-modal")
   );
+
   $("btn-task-close")?.addEventListener("click", () =>
     closeModal("task-modal")
   );
@@ -1969,10 +2089,12 @@ function wireButtons() {
 
   $("btn-ar-open")?.addEventListener("click", openAR);
   $("btn-ar-stop")?.addEventListener("click", stopAR);
+
   $("btn-ar-close")?.addEventListener("click", () => {
     stopAR();
     closeModal("ar-modal");
   });
+
   $("btn-ar-manual")?.addEventListener("click", () => {
     stopAR();
     closeModal("ar-modal");
@@ -1984,6 +2106,7 @@ function wireButtons() {
 /* ============================
    BOOT
 ============================ */
+
 function boot() {
   try {
     renderHUD();
@@ -1993,13 +2116,18 @@ function boot() {
     renderHomeLog();
     renderShop();
     wireButtons();
-
     loadVoices();
+
     if ("speechSynthesis" in window) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
 
     initMap();
+    applyRuntimeLayoutTweaks();
+    ensureAdventureIntroCard();
+    maybePlayAdventureIntro(false);
+    refreshFloatingButtonLayout();
+
     console.log("App loaded");
   } catch (err) {
     console.error("BOOT ERROR:", err);
